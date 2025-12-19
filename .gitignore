@@ -3,5 +3,8 @@
 /source_data/ovital/*
 /source_data/variflight/*
 output.csv
+output/
 .cache
 /test
+tests/output/
+*.log

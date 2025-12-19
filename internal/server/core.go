@@ -3,12 +3,15 @@ package server
 import (
 	"errors"
 	"fmt"
+	"math"
 	"path"
+	"time"
 	consts "steplife-universal-importer/internal/const"
 	"steplife-universal-importer/internal/model"
 	"steplife-universal-importer/internal/parser"
 	"steplife-universal-importer/internal/utils"
 	"steplife-universal-importer/internal/utils/logx"
+	"steplife-universal-importer/internal/utils/pointcalc"
 )
 
 // Run
@@ -16,14 +19,38 @@ import (
 //	@Description: 	执行
 //	@return error
 func Run(config model.Config) error {
-	directory := "./source_data"
-	csvFilePath := "./output.csv"
+	// 尝试多个可能的source_data目录位置
+	sourceDataPaths := []string{
+		"./source_data",     // 当前目录
+		"../source_data",    // 父目录（从tests目录运行时）
+	}
+
+	var directory string
+	var filePathMap map[string][]string
+	var err error
+
+	for _, path := range sourceDataPaths {
+		filePathMap, err = utils.GetAllFilePath(path)
+		if err == nil {
+			directory = path
+			logx.InfoF("找到source_data目录：%s", path)
+			break
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to read directory from any location: %w", err)
+	}
+
+	// 根据source_data目录位置确定output.csv路径
+	var csvFilePath string
+	if directory == "../source_data" {
+		csvFilePath = "../output.csv"
+	} else {
+		csvFilePath = "./output.csv"
+	}
 
 	csvExisted, err := utils.CreateCSVFile(csvFilePath)
-	if err != nil {
-		return err
-	}
-	filePathMap, err := utils.GetAllFilePath(directory)
 	if err != nil {
 		return err
 	}
@@ -60,6 +87,182 @@ func Run(config model.Config) error {
 	}
 
 	return nil
+}
+
+// ProcessSingleFile 处理单个文件
+func ProcessSingleFile(fileType, filePath, csvFilePath string, config model.Config) error {
+	// 创建CSV文件
+	csvExisted, err := utils.CreateCSVFile(csvFilePath)
+	if err != nil {
+		return err
+	}
+
+	// 如果文件不存在，写入CSV文件头
+	if !csvExisted {
+		sl := model.NewStepLife()
+		err = utils.WriteCSV(csvFilePath, sl.CSVHeader)
+		if err != nil {
+			logx.ErrorF("写入CSV文件头失败：%s", csvFilePath)
+			return err
+		}
+	}
+
+	logx.InfoF("处理文件：%s", filePath)
+
+	sl, err := processOneFile(fileType, filePath, config)
+	if err != nil {
+		logx.ErrorF("处理文件失败：%s", filePath)
+		return err
+	}
+
+	err = utils.WriteCSV(csvFilePath, sl.CSVData)
+	if err != nil {
+		logx.ErrorF("写入CSV文件失败：%s", csvFilePath)
+		return err
+	}
+
+	return nil
+}
+
+func processOneFile(fileType, filePath string, config model.Config) (*model.StepLife, error) {
+	var adaptor parser.FileAdaptor
+
+	if fileType == consts.FileTypeCommon {
+		adaptor = parser.CreateAdaptor(path.Ext(filePath))
+	} else if fileType == consts.FileTypeVariFlight {
+		logx.ErrorF("飞常准数据后续支持......")
+		return nil, nil
+	} else {
+		logx.ErrorF("不支持的文件类型：%s", fileType)
+		return nil, errors.New(fmt.Sprintf("不支持的文件类型：%s", fileType))
+	}
+
+	if adaptor == nil {
+		return nil, errors.New(fmt.Sprintf("不支持的结构解析（%s）", fileType))
+	}
+
+	content, err := utils.ReadFile(filePath)
+	if err != nil {
+		logx.ErrorF("读取文件失败：%s", filePath)
+		return nil, err
+	}
+
+	latLngData, err := adaptor.Parse(content)
+	if err != nil {
+		logx.ErrorF("解析文件失败：%s", filePath)
+		return nil, err
+	}
+
+	sl, err := convertToStepLifeWithAdvancedOptions(config, latLngData)
+	if err != nil {
+		logx.ErrorF("转换文件失败：%s", filePath)
+		return nil, err
+	}
+
+	return sl, nil
+}
+
+func convertToStepLifeWithAdvancedOptions(config model.Config, points []model.Point) (*model.StepLife, error) {
+	sl := model.NewStepLife()
+	logx.Info("处理经纬度坐标（高级模式）")
+
+	// 计算时间间隔（如果设置了结束时间）
+	timeInterval := int64(1) // 默认1秒间隔
+	if config.PathEndTimestamp > 0 && config.PathStartTimestamp > 0 && len(points) > 1 {
+		totalDuration := config.PathEndTimestamp - config.PathStartTimestamp
+		timeInterval = totalDuration / int64(len(points)-1)
+		if timeInterval < 1 {
+			timeInterval = 1
+		}
+	}
+
+	currentTimestamp := config.PathStartTimestamp
+	if currentTimestamp == 0 {
+		currentTimestamp = time.Now().Unix()
+	}
+
+	for i, point := range points {
+		// 第0个坐标或者不需要插入值，不需要计算中间点，直接写入
+		if i == 0 || config.EnableInsertPointStrategy == 0 {
+			row := model.NewRow()
+			row.DataTime = currentTimestamp
+			row.Altitude = config.DefaultAltitude // 使用配置的海拔高度
+			row.Speed = calculateSpeed(config, points, i) // 计算速度
+			row.Latitude = point.Latitude
+			row.Longitude = point.Longitude
+			sl.AddCSVRow(*row)
+		} else {
+			interpolatedPoints := pointcalc.Calculate(points[i-1], point, config.InsertPointDistance)
+			for _, interpolatedPoint := range interpolatedPoints {
+				row := model.NewRow()
+				row.Point = interpolatedPoint
+				row.DataTime = currentTimestamp
+				row.Altitude = config.DefaultAltitude
+				row.Speed = calculateSpeed(config, points, i)
+				sl.AddCSVRow(*row)
+				currentTimestamp += timeInterval
+			}
+		}
+
+		if i > 0 {
+			currentTimestamp += timeInterval
+		}
+	}
+
+	logx.InfoF("处理经纬度完成，原始坐标%d个，插点后坐标%d个", len(points), len(sl.CSVData))
+	return sl, nil
+}
+
+// calculateSpeed 计算速度
+func calculateSpeed(config model.Config, points []model.Point, currentIndex int) float64 {
+	if config.SpeedMode == "manual" {
+		return config.ManualSpeed
+	}
+
+	// 自动计算速度
+	if currentIndex == 0 || currentIndex >= len(points) {
+		return 0.0
+	}
+
+	// 计算两点间的距离和时间差来估算速度
+	prevPoint := points[currentIndex-1]
+	currPoint := points[currentIndex]
+
+	// 使用Haversine公式计算距离（米）
+	distance := calculateHaversineDistance(prevPoint.Latitude, prevPoint.Longitude, currPoint.Latitude, currPoint.Longitude)
+
+	// 估算时间差（假设平均速度）
+	estimatedTimeDiff := 1.0 // 1秒
+	if distance > 0 {
+		// 假设平均步行速度为1.5 m/s，计算合理的时间差
+		estimatedTimeDiff = distance / 1.5
+		if estimatedTimeDiff < 1 {
+			estimatedTimeDiff = 1
+		}
+	}
+
+	return distance / estimatedTimeDiff
+}
+
+// calculateHaversineDistance 计算两点间的球面距离（米）
+func calculateHaversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadius = 6371000.0 // 地球半径（米）
+
+	// 转换为弧度
+	lat1Rad := lat1 * math.Pi / 180
+	lon1Rad := lon1 * math.Pi / 180
+	lat2Rad := lat2 * math.Pi / 180
+	lon2Rad := lon2 * math.Pi / 180
+
+	deltaLat := lat2Rad - lat1Rad
+	deltaLon := lon2Rad - lon1Rad
+
+	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+		math.Cos(lat1Rad)*math.Cos(lat2Rad)*
+		math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return earthRadius * c
 }
 
 func parseOne(fileType, filePath string, config model.Config) (*model.StepLife, error) {
