@@ -67,6 +67,8 @@ type GUI struct {
 	createOutputDir bool // 是否创建output文件夹
 	isFileMode      bool // 是否为文件选择模式（true=文件，false=文件夹）
 	showLog         bool // 是否显示处理日志
+	isDarkTheme     bool // 当前是否为暗色主题
+	isInitialized   bool // 窗口是否已初始化
 	statusLabel     *widget.Label
 	progressBar     *widget.ProgressBar
 	logText         *widget.Entry
@@ -76,27 +78,35 @@ type GUI struct {
 }
 
 type myTheme struct {
-	regular fyne.Resource
+	baseTheme fyne.Theme
+	regular   fyne.Resource
 }
 
 func (t *myTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	return theme.DefaultTheme().Color(name, variant)
+	return t.baseTheme.Color(name, variant)
 }
 
 func (t *myTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
-	return theme.DefaultTheme().Icon(name)
+	return t.baseTheme.Icon(name)
 }
 
 func (m *myTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return m.regular
+	if m.regular != nil {
+		return m.regular
+	}
+	return m.baseTheme.Font(style)
 }
 
 func (m *myTheme) Size(name fyne.ThemeSizeName) float32 {
-	return theme.DefaultTheme().Size(name)
+	return m.baseTheme.Size(name)
 }
 
 func (t *myTheme) SetFonts(regularFontPath string) {
 	t.regular = loadCustomFont(regularFontPath)
+}
+
+func (t *myTheme) SetBaseTheme(base fyne.Theme) {
+	t.baseTheme = base
 }
 
 func loadCustomFont(fontPath string) fyne.Resource {
@@ -127,7 +137,10 @@ func NewGUI() *GUI {
 
 	mytheme := &myTheme{}                             // 设置自定义主题
 	mytheme.SetFonts("./resource/MiSans-Regular.otf") // 设置自定义字体
-	gui.app.Settings().SetTheme(mytheme)              // 设置自定义主题
+	mytheme.SetBaseTheme(theme.LightTheme())          // 默认使用亮色主题
+	gui.customTheme = mytheme
+	gui.isDarkTheme = false
+	gui.app.Settings().SetTheme(mytheme) // 设置自定义主题
 
 	gui.window = gui.app.NewWindow(fmt.Sprintf("一生足迹数据导入器 v%s", consts.Version))
 	gui.window.SetMaster()
@@ -146,6 +159,34 @@ func (g *GUI) Run() {
 	})
 
 	g.window.ShowAndRun()
+}
+
+// toggleTheme 切换主题（亮色/暗色）
+func (g *GUI) toggleTheme() {
+	if g.customTheme == nil {
+		return
+	}
+
+	mytheme, ok := g.customTheme.(*myTheme)
+	if !ok {
+		return
+	}
+
+	// 切换主题
+	if g.isDarkTheme {
+		mytheme.SetBaseTheme(theme.LightTheme())
+		g.isDarkTheme = false
+		g.addLog("切换到亮色主题")
+	} else {
+		mytheme.SetBaseTheme(theme.DarkTheme())
+		g.isDarkTheme = true
+		g.addLog("切换到暗色主题")
+	}
+
+	// 应用新主题
+	g.app.Settings().SetTheme(mytheme)
+	// 重新创建窗口内容以更新按钮提示文本
+	g.createMainWindow()
 }
 
 // loadConfig 加载配置文件
@@ -194,7 +235,11 @@ func (g *GUI) createMainWindow() {
 	g.window.SetContent(g.createMainLayout())
 	// 设置最小窗口大小，而不是固定大小
 	g.window.SetFixedSize(false)
-	g.window.Resize(fyne.NewSize(900, 1000))
+	// 只在首次创建时设置初始大小（避免切换主题时改变窗口大小）
+	if !g.isInitialized {
+		g.window.Resize(fyne.NewSize(900, 1000))
+		g.isInitialized = true
+	}
 }
 
 // createMainLayout 创建主界面布局
@@ -258,7 +303,7 @@ func (g *GUI) createMainLayout() fyne.CanvasObject {
 	// 初始化日志显示区域（只在第一次调用时）
 	if g.logText == nil {
 		g.logText = widget.NewMultiLineEntry()
-		g.logText.Disable()                           // 设置为只读（禁用编辑）
+		// g.logText.Disable()                           // 设置为只读（禁用编辑）
 		g.logText.Wrapping = fyne.TextWrapWord        // 启用自动换行
 		g.logScroll = container.NewVScroll(g.logText) // 使用垂直滚动，优化滚动体验
 		// 设置最小尺寸，宽度设为0以允许随窗口宽度变化
@@ -270,12 +315,29 @@ func (g *GUI) createMainLayout() fyne.CanvasObject {
 		g.logScroll,
 	)
 
+	// 创建主题切换按钮
+	var buttonText string
+	if g.isDarkTheme {
+		buttonText = "🌞" // 亮色主题图标
+	} else {
+		buttonText = "🌙" // 暗色主题图标
+	}
+	themeButton := widget.NewButtonWithIcon(buttonText, theme.ColorPaletteIcon(), func() {
+		g.toggleTheme()
+	})
+	themeButton.Importance = widget.MediumImportance
+
 	// 文件选择区域布局
 	sourceDirContainer := container.NewBorder(
 		nil, nil, nil, sourceDirButton, sourceDirEntry,
 	)
 	sourceDirRow := container.NewVBox(
-		container.NewHBox(sourceDirLabel, modeSelect),
+		container.NewHBox(
+			sourceDirLabel,
+			modeSelect,
+			layout.NewSpacer(), // 将主题按钮推到右边
+			themeButton,
+		),
 		sourceDirContainer,
 	)
 
@@ -287,11 +349,16 @@ func (g *GUI) createMainLayout() fyne.CanvasObject {
 		outputDirContainer,
 	)
 
-	// 状态和日志区域 - 日志区域会自动扩展填充可用空间
-	statusAndLogArea := container.NewVBox(
-		statusCard,
-		widget.NewSeparator(),
-		logCard,
+	// 状态和日志区域 - 使用Border布局让日志区域填充剩余空间
+	statusAndLogArea := container.NewBorder(
+		container.NewVBox(
+			statusCard,
+			widget.NewSeparator(),
+		), // 顶部：状态卡片和分隔符
+		nil,     // 底部：无内容
+		nil,     // 左侧：无内容
+		nil,     // 右侧：无内容
+		logCard, // 中心：日志卡片，填充剩余空间
 	)
 
 	fileSelectionArea := container.NewVBox(
@@ -300,10 +367,16 @@ func (g *GUI) createMainLayout() fyne.CanvasObject {
 	)
 
 	// 可滚动的主内容区域（不包含按钮）
-	scrollableContent := container.NewVBox(
-		fileSelectionArea,
-		paramsCard,
-		statusAndLogArea,
+	// 使用Border布局让状态和日志区域填充剩余空间
+	scrollableContent := container.NewBorder(
+		container.NewVBox(
+			fileSelectionArea,
+			paramsCard,
+		), // 顶部：文件选择和参数设置区域
+		nil,              // 底部：无内容
+		nil,              // 左侧：无内容
+		nil,              // 右侧：无内容
+		statusAndLogArea, // 中心：状态和日志区域，填充剩余空间
 	)
 
 	// 添加滚动容器 - 使用垂直滚动，优化滚动体验
