@@ -105,6 +105,10 @@ func (t *myTheme) SetFonts(regularFontPath string) {
 	t.regular = loadCustomFont(regularFontPath)
 }
 
+func (t *myTheme) SetFontsFromEmbedded() {
+	t.regular = loadCustomFontFromEmbedded()
+}
+
 func (t *myTheme) SetBaseTheme(base fyne.Theme) {
 	t.baseTheme = base
 }
@@ -135,9 +139,9 @@ func NewGUI() *GUI {
 		},
 	}
 
-	mytheme := &myTheme{}                             // 设置自定义主题
-	mytheme.SetFonts("./resource/MiSans-Regular.otf") // 设置自定义字体
-	mytheme.SetBaseTheme(theme.LightTheme())          // 默认使用亮色主题
+	mytheme := &myTheme{}                    // 设置自定义主题
+	mytheme.SetFontsFromEmbedded()           // 从嵌入资源加载字体
+	mytheme.SetBaseTheme(theme.LightTheme()) // 默认使用亮色主题
 	gui.customTheme = mytheme
 	gui.isDarkTheme = false
 	gui.app.Settings().SetTheme(mytheme) // 设置自定义主题
