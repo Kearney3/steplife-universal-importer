@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'  # 匹配所有以 v 开头的 tag，如 v1.0.0
+#    tags:
+#      - 'v*'  # 匹配所有以 v 开头的 tag，如 v1.0.0
   workflow_dispatch:  # 允许手动触发工作流
 
 jobs:
@@ -33,6 +33,46 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24.2'
+      
+      - name: Install Linux dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          
+          # 安装构建依赖（根据架构动态安装）
+          if [ "${{ matrix.goarch }}" == "arm64" ]; then
+            # 对于 ARM64，使用 qemu 用户空间模拟和多架构支持
+            sudo apt-get install -y \
+              qemu-user-static \
+              qemu-user \
+              binfmt-support
+            
+            # 添加 ARM64 架构支持
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+            
+            # 安装 ARM64 架构的开发库和交叉编译工具链
+            sudo apt-get install -y \
+              libgl1-mesa-dev:arm64 \
+              libx11-dev:arm64 \
+              libxrandr-dev:arm64 \
+              libxinerama-dev:arm64 \
+              libxcursor-dev:arm64 \
+              libxi-dev:arm64 \
+              pkg-config \
+              gcc-aarch64-linux-gnu \
+              g++-aarch64-linux-gnu
+          else
+            # 对于 amd64，安装标准库
+            sudo apt-get install -y \
+              libgl1-mesa-dev \
+              libx11-dev \
+              libxrandr-dev \
+              libxinerama-dev \
+              libxcursor-dev \
+              libxi-dev \
+              pkg-config
+          fi
       
       - name: Extract app info
         id: app_info
@@ -91,7 +131,48 @@ jobs:
             echo "Warning: icon.ico not found, skipping icon embedding"
           fi
       
-      - name: Build
+      - name: Build (using Docker for ARM64 Linux)
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
+        id: build_docker
+        run: |
+          # 动态生成输出文件名（基于模块名）
+          EXECUTABLE_NAME="${{ steps.app_info.outputs.EXECUTABLE_NAME }}"
+          OUTPUT_FILE="${EXECUTABLE_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          
+          # 使用 Docker 在 ARM64 容器中构建
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e GOOS=linux \
+            -e GOARCH=arm64 \
+            -e CGO_ENABLED=1 \
+            --platform linux/arm64 \
+            -u root:root \
+            golang:1.24.2 \
+            bash -c "
+              apt-get update && \
+              apt-get install -y \
+                libgl1-mesa-dev \
+                libx11-dev \
+                libxrandr-dev \
+                libxinerama-dev \
+                libxcursor-dev \
+                libxi-dev \
+                pkg-config \
+                gcc && \
+              go build -tags=embed_font -trimpath -ldflags='-s -w' -o ${OUTPUT_FILE} ./cmd && \
+              chmod 755 ${OUTPUT_FILE}
+            "
+          
+          # 确保文件权限正确（Docker 可能创建 root 拥有的文件）
+          sudo chown $USER:$USER "${OUTPUT_FILE}" || true
+          chmod +x "${OUTPUT_FILE}" || true
+          
+          # 将输出文件名保存为步骤输出
+          echo "OUTPUT_FILE=${OUTPUT_FILE}" >> $GITHUB_OUTPUT
+      
+      - name: Build (native build)
+        if: matrix.goos != 'linux' || matrix.goarch != 'arm64'
         id: build
         env:
           GOOS: ${{ matrix.goos }}
@@ -104,6 +185,11 @@ jobs:
           # Windows 平台添加 .exe 扩展名
           if [ "${{ matrix.goos }}" == "windows" ]; then
             OUTPUT_FILE="${OUTPUT_FILE}.exe"
+          fi
+          
+          # 为 Linux 构建设置 CGO
+          if [ "${{ matrix.goos }}" == "linux" ]; then
+            export CGO_ENABLED=1
           fi
           
           # 构建
@@ -120,8 +206,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.build.outputs.OUTPUT_FILE }}
-          path: ${{ steps.build.outputs.OUTPUT_FILE }}
+          name: ${{ steps.build_docker.outputs.OUTPUT_FILE || steps.build.outputs.OUTPUT_FILE }}
+          path: ${{ steps.build_docker.outputs.OUTPUT_FILE || steps.build.outputs.OUTPUT_FILE }}
           retention-days: 1
   
   build-macos:
@@ -183,13 +269,31 @@ jobs:
       - name: Build
         id: build
         env:
+          GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
         run: |
           # 动态生成输出文件名（基于模块名）
           EXECUTABLE_NAME="${{ steps.app_info.outputs.EXECUTABLE_NAME }}"
           OUTPUT_FILE="${EXECUTABLE_NAME}-darwin-${{ matrix.goarch }}"
           
-          # 构建（macOS 原生构建，不需要设置 GOOS）
+          # 对于交叉编译（在 Apple Silicon 上构建 amd64），需要设置 SDK 路径
+          if [ "${{ matrix.goarch }}" == "amd64" ] && [ "$(uname -m)" == "arm64" ]; then
+            # 设置 macOS SDK 路径（用于交叉编译）
+            export SDKROOT=$(xcrun --show-sdk-path)
+            # 使用 x86_64 架构的 clang（用于交叉编译）
+            export CC="$(xcrun --find clang) -arch x86_64"
+            export CXX="$(xcrun --find clang++) -arch x86_64"
+          fi
+          
+          # 显示构建信息
+          echo "Building for GOOS=darwin GOARCH=${{ matrix.goarch }}"
+          echo "CGO_ENABLED=$CGO_ENABLED"
+          if [ -n "$CC" ]; then
+            echo "CC=$CC"
+          fi
+          
+          # 构建（明确设置 GOOS=darwin 和 GOARCH，启用 CGO）
           go build -tags=embed_font -trimpath -ldflags="-s -w" -o "${OUTPUT_FILE}" ./cmd
           
           # 将输出文件名保存为步骤输出，供后续步骤使用
