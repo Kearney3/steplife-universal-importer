@@ -8,3 +8,21 @@ output/
 /test
 tests/output/
 *.log
+
+# 忽略构建的二进制文件
+main
+main.exe
+# 忽略常见的二进制文件扩展名
+*.exe
+*.dll
+*.so
+*.dylib
+# 忽略测试构建文件
+main_test
+main_test.exe
+
+# 构建输出目录
+artifacts/
+dist/
+build/
+

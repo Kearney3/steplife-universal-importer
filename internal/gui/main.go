@@ -146,6 +146,12 @@ func NewGUI() *GUI {
 	gui.isDarkTheme = false
 	gui.app.Settings().SetTheme(mytheme) // 设置自定义主题
 
+	// 设置应用图标
+	icon := loadIconFromEmbedded()
+	if icon != nil {
+		gui.app.SetIcon(icon)
+	}
+
 	gui.window = gui.app.NewWindow(fmt.Sprintf("一生足迹数据导入器 v%s", consts.Version))
 	gui.window.SetMaster()
 
