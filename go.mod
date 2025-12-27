@@ -1,10 +1,9 @@
-module steplife-universal-importer
+module steplife-universal-importer-gui
 
 go 1.24.2
 
 require (
 	fyne.io/fyne/v2 v2.4.4
-	github.com/eiannone/keyboard v0.0.0-20220611211555-0d226195f203
 	github.com/kellydunn/golang-geo v0.7.0
 	github.com/pkg/errors v0.9.1
 	github.com/tidwall/gjson v1.18.0

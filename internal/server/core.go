@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"math"
 	"path"
-	consts "steplife-universal-importer/internal/const"
-	"steplife-universal-importer/internal/model"
-	"steplife-universal-importer/internal/parser"
-	"steplife-universal-importer/internal/utils"
-	"steplife-universal-importer/internal/utils/logx"
-	"steplife-universal-importer/internal/utils/pointcalc"
+	consts "steplife-universal-importer-gui/internal/const"
+	"steplife-universal-importer-gui/internal/model"
+	"steplife-universal-importer-gui/internal/parser"
+	"steplife-universal-importer-gui/internal/utils"
+	"steplife-universal-importer-gui/internal/utils/logx"
+	"steplife-universal-importer-gui/internal/utils/pointcalc"
 	"time"
 )
 
@@ -49,20 +49,9 @@ func Run(config model.Config) error {
 		csvFilePath = "./output.csv"
 	}
 
-	csvExisted, err := utils.CreateCSVFile(csvFilePath)
-	if err != nil {
-		return err
-	}
-
-	// 如果文件曾经不存在，则写入CSV文件头
-	if !csvExisted {
-		sl := model.NewStepLife()
-		err = utils.WriteCSV(csvFilePath, sl.CSVHeader)
-		if err != nil {
-			logx.ErrorF("写入CSV文件头失败：%s", csvFilePath)
-			return err
-		}
-	}
+	// 收集所有数据
+	sl := model.NewStepLife()
+	allData := append([][]string{}, sl.CSVHeader...) // 先添加文件头
 
 	for fileType, paths := range filePathMap {
 		for i, filePath := range paths {
@@ -74,15 +63,19 @@ func Run(config model.Config) error {
 				return err
 			}
 
-			err = utils.WriteCSV(csvFilePath, sl.CSVData)
-			if err != nil {
-				logx.ErrorF("写入CSV文件失败：%s", csvFilePath)
-				return err
-			}
+			// 收集数据，不立即写入
+			allData = append(allData, sl.CSVData...)
 
 			// 更新起始时间戳
 			config.PathStartTimestamp += int64(len(sl.CSVData))
 		}
+	}
+
+	// 一次性写入所有数据（覆盖模式）
+	err = utils.WriteCSV(csvFilePath, allData)
+	if err != nil {
+		logx.ErrorF("写入CSV文件失败：%s", csvFilePath)
+		return err
 	}
 
 	return nil
@@ -90,22 +83,6 @@ func Run(config model.Config) error {
 
 // ProcessSingleFile 处理单个文件
 func ProcessSingleFile(fileType, filePath, csvFilePath string, config model.Config) error {
-	// 创建CSV文件
-	csvExisted, err := utils.CreateCSVFile(csvFilePath)
-	if err != nil {
-		return err
-	}
-
-	// 如果文件不存在，写入CSV文件头
-	if !csvExisted {
-		sl := model.NewStepLife()
-		err = utils.WriteCSV(csvFilePath, sl.CSVHeader)
-		if err != nil {
-			logx.ErrorF("写入CSV文件头失败：%s", csvFilePath)
-			return err
-		}
-	}
-
 	logx.InfoF("处理文件：%s", filePath)
 
 	sl, err := processOneFile(fileType, filePath, config)
@@ -114,7 +91,9 @@ func ProcessSingleFile(fileType, filePath, csvFilePath string, config model.Conf
 		return err
 	}
 
-	err = utils.WriteCSV(csvFilePath, sl.CSVData)
+	// 合并文件头和数据，直接覆盖写入
+	allRows := append(append([][]string{}, sl.CSVHeader...), sl.CSVData...)
+	err = utils.WriteCSV(csvFilePath, allRows)
 	if err != nil {
 		logx.ErrorF("写入CSV文件失败：%s", csvFilePath)
 		return err
@@ -193,15 +172,22 @@ func convertToStepLifeWithAdvancedOptions(config model.Config, points []model.Po
 		}
 	}
 
-	// 计算时间间隔（如果设置了结束时间）
-	var timeInterval int64 = 1 // 默认1秒间隔
+	// 计算时间间隔
+	// 优先级：结束时间 > 用户指定的时间间隔 > 统一为开始时间
+	var timeInterval int64 = 0
 	useEndTime := config.PathEndTimestamp > 0 && startTimestamp > 0 && totalPoints > 1
+	useTimeInterval := config.TimeInterval != 0 && startTimestamp > 0 && totalPoints > 1
+	
 	if useEndTime {
+		// 如果设置了结束时间，计算均匀分配的时间间隔
 		totalDuration := config.PathEndTimestamp - startTimestamp
 		timeInterval = totalDuration / (totalPoints - 1)
 		if timeInterval < 1 {
 			timeInterval = 1
 		}
+	} else if useTimeInterval {
+		// 如果用户指定了时间间隔，使用指定的间隔
+		timeInterval = config.TimeInterval
 	}
 
 	// 使用点索引来计算时间戳，确保最后一个点的时间戳等于结束时间
@@ -218,8 +204,12 @@ func convertToStepLifeWithAdvancedOptions(config model.Config, points []model.Po
 				if i == len(points)-1 {
 					currentTimestamp = config.PathEndTimestamp
 				}
-			} else {
+			} else if useTimeInterval {
+				// 如果设置了时间间隔，按照间隔递增
 				currentTimestamp = startTimestamp + pointIndex*timeInterval
+			} else {
+				// 如果都没有设置，所有时间统一为开始时间
+				currentTimestamp = startTimestamp
 			}
 
 			row := model.NewRow()
@@ -241,8 +231,12 @@ func convertToStepLifeWithAdvancedOptions(config model.Config, points []model.Po
 					if i == len(points)-1 && j == len(interpolatedPoints)-1 {
 						currentTimestamp = config.PathEndTimestamp
 					}
-				} else {
+				} else if useTimeInterval {
+					// 如果设置了时间间隔，按照间隔递增
 					currentTimestamp = startTimestamp + pointIndex*timeInterval
+				} else {
+					// 如果都没有设置，所有时间统一为开始时间
+					currentTimestamp = startTimestamp
 				}
 
 				row := model.NewRow()

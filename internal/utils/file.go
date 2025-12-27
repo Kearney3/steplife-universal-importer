@@ -3,11 +3,12 @@ package utils
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
 	"os"
 	"path/filepath"
-	consts "steplife-universal-importer/internal/const"
+	consts "steplife-universal-importer-gui/internal/const"
+
+	"github.com/pkg/errors"
 )
 
 // CreateCSVFile
@@ -91,12 +92,12 @@ func ReadFile(filePath string) ([]byte, error) {
 
 // WriteCSV
 //
-//	@Description: 	写入 CSV 文件
+//	@Description: 	写入 CSV 文件（覆盖模式）
 //	@param filePath
 //	@param rows
 //	@return error
 func WriteCSV(filePath string, rows [][]string) error {
-	csvFile, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	csvFile, err := os.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}

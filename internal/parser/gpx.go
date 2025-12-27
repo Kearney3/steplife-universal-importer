@@ -2,9 +2,9 @@ package parser
 
 import (
 	"encoding/xml"
-	"steplife-universal-importer/internal/model"
-	"steplife-universal-importer/internal/utils/logx"
-	timeUtils "steplife-universal-importer/internal/utils/time"
+	"steplife-universal-importer-gui/internal/model"
+	"steplife-universal-importer-gui/internal/utils/logx"
+	timeUtils "steplife-universal-importer-gui/internal/utils/time"
 	"strings"
 )
 

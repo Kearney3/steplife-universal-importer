@@ -435,7 +435,17 @@ jobs:
       
       - name: Get tag name
         id: tag
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # 从 tag 触发，提取 tag 名
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          else
+            # 手动触发或其他情况，使用版本号作为 tag 名
+            VERSION=$(grep 'Version = ' internal/const/consts.go | sed 's/.*Version = "\(.*\)".*/\1/' | head -1)
+            TAG_NAME="v${VERSION}"
+          fi
+          echo "tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "Tag name: ${TAG_NAME}"
       
       - name: Extract app info for release notes
         id: release_info

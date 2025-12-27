@@ -3,8 +3,8 @@ package parser
 import (
 	"encoding/json"
 	"github.com/tidwall/gjson"
-	"steplife-universal-importer/internal/model"
-	"steplife-universal-importer/internal/utils/logx"
+	"steplife-universal-importer-gui/internal/model"
+	"steplife-universal-importer-gui/internal/utils/logx"
 )
 
 type Ovjsn struct {

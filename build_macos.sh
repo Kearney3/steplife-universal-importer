@@ -54,7 +54,7 @@ EXECUTABLE_NAME=$(basename "$MODULE_NAME")
 APP_BUNDLE_NAME="${APP_NAME}-${ARCH}.app"
 
 # 生成可执行文件输出名称
-OUTPUT_NAME="steplife-universal-importer-darwin-${ARCH}"
+OUTPUT_NAME="${APP_NAME}-darwin-${ARCH}"
 
 echo "应用信息:"
 echo "  应用名称: $APP_NAME"

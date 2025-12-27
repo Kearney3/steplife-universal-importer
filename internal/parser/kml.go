@@ -2,7 +2,7 @@ package parser
 
 import (
 	"encoding/xml"
-	"steplife-universal-importer/internal/model"
+	"steplife-universal-importer-gui/internal/model"
 	"strconv"
 	"strings"
 )

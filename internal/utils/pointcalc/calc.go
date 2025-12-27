@@ -3,7 +3,7 @@ package pointcalc
 import (
 	"github.com/kellydunn/golang-geo"
 	"math"
-	"steplife-universal-importer/internal/model"
+	"steplife-universal-importer-gui/internal/model"
 )
 
 // Calculate

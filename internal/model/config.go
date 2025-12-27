@@ -5,6 +5,7 @@ type Config struct {
 	InsertPointDistance       int     `ini:"insertPointDistance"`
 	PathStartTime             string  `ini:"pathStartTime"`
 	PathEndTime               string  `ini:"pathEndTime"`
+	TimeInterval              int64   `ini:"timeInterval"` // 时间间隔（秒）
 	PathStartTimestamp        int64
 	PathEndTimestamp          int64
 	DefaultAltitude           float64 `ini:"defaultAltitude"`

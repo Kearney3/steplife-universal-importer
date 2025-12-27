@@ -9,8 +9,8 @@ import (
 
 // loadCustomFontFromEmbedded 从文件系统加载字体（当不使用嵌入字体时）
 func loadCustomFontFromEmbedded() fyne.Resource {
-	// 回退到文件系统路径
-	return loadCustomFont("./resource/MiSans-Regular.otf")
+	// 从 internal/gui/resources 路径加载字体（与嵌入模式使用同一文件）
+	return loadCustomFont("./internal/gui/resources/MiSans-Regular.otf")
 }
 
 // loadIconFromEmbedded 从文件系统加载图标（当不使用嵌入资源时）

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	consts "steplife-universal-importer/internal/const"
-	"steplife-universal-importer/internal/model"
-	"steplife-universal-importer/internal/server"
-	"steplife-universal-importer/internal/utils/logx"
-	timeUtils "steplife-universal-importer/internal/utils/time"
+	consts "steplife-universal-importer-gui/internal/const"
+	"steplife-universal-importer-gui/internal/model"
+	"steplife-universal-importer-gui/internal/server"
+	"steplife-universal-importer-gui/internal/utils/logx"
+	timeUtils "steplife-universal-importer-gui/internal/utils/time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -232,6 +232,7 @@ func (g *GUI) saveConfig() error {
 	section.Key("insertPointDistance").SetValue(fmt.Sprintf("%d", g.config.InsertPointDistance))
 	section.Key("pathStartTime").SetValue(g.config.PathStartTime)
 	section.Key("pathEndTime").SetValue(g.config.PathEndTime)
+	section.Key("timeInterval").SetValue(fmt.Sprintf("%d", g.config.TimeInterval))
 	section.Key("defaultAltitude").SetValue(fmt.Sprintf("%.2f", g.config.DefaultAltitude))
 	section.Key("speedMode").SetValue(g.config.SpeedMode)
 	section.Key("manualSpeed").SetValue(fmt.Sprintf("%.2f", g.config.ManualSpeed))
@@ -247,7 +248,7 @@ func (g *GUI) createMainWindow() {
 	g.window.SetFixedSize(false)
 	// 只在首次创建时设置初始大小（避免切换主题时改变窗口大小）
 	if !g.isInitialized {
-		g.window.Resize(fyne.NewSize(900, 1000))
+		g.window.Resize(fyne.NewSize(900, 1100))
 		g.isInitialized = true
 	}
 }
@@ -505,14 +506,34 @@ func (g *GUI) createTimeSettings() fyne.CanvasObject {
 
 	endTimeContainer := container.NewBorder(nil, nil, nil, endTimeButton, endTimeEntry)
 
-	// 添加提示信息：如果开始时间大于结束时间，轨迹会自动反转
-	tipLabel := widget.NewLabel("💡 提示：如果开始时间大于结束时间，轨迹将自动反转处理")
+	// 时间间隔输入框
+	timeIntervalEntry := widget.NewEntry()
+	timeIntervalEntry.SetPlaceHolder("时间间隔(秒)，例如: 1 或 -1 (可选，负数会反转轨迹)")
+	if g.config.TimeInterval != 0 {
+		timeIntervalEntry.SetText(fmt.Sprintf("%d", g.config.TimeInterval))
+	}
+	timeIntervalEntry.Resize(fyne.NewSize(250, timeIntervalEntry.MinSize().Height))
+	timeIntervalEntry.OnChanged = func(text string) {
+		if text == "" {
+			g.config.TimeInterval = 0
+		} else {
+			if val, err := strconv.ParseInt(text, 10, 64); err == nil && val != 0 {
+				g.config.TimeInterval = val
+			}
+		}
+	}
+
+	timeIntervalContainer := container.NewBorder(nil, nil, nil, nil, timeIntervalEntry)
+
+	// 添加提示信息
+	tipLabel := widget.NewLabel("💡 提示：\n1. 如果设置了结束时间，系统会在开始和结束时间之间均匀分配时间\n2. 如果设置了时间间隔，系统会按照指定间隔分配时间（负数会反转时间顺序）\n3. 如果都没有设置，所有时间统一为开始时间\n4. 如果开始时间大于结束时间，轨迹将自动反转处理")
 	tipLabel.Wrapping = fyne.TextWrapWord
 
 	return container.NewVBox(
 		container.New(layout.NewFormLayout(),
 			widget.NewLabel("开始时间:"), startTimeContainer,
 			widget.NewLabel("结束时间:"), endTimeContainer,
+			widget.NewLabel("时间间隔:"), timeIntervalContainer,
 		),
 		container.NewPadded(tipLabel),
 	)
@@ -762,6 +783,7 @@ func (g *GUI) resetConfig() {
 		EnableBatchProcessing:     1,
 		PathStartTime:             "",
 		PathEndTime:               "",
+		TimeInterval:              0,
 		PathStartTimestamp:        0,
 		PathEndTimestamp:          0,
 	}
